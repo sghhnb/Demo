@@ -1,3 +1,3 @@
 # Demo
-tensorflow test \n
+tensorflow test
 run E_Tensorflow_first.py
