@@ -1,13 +1,13 @@
 import tensorflow as tf
 import A_tfrecords
 '''
-    作者：石高辉
-    功能：将人脸图像进行二分类
+    @作者： 石高辉
+     功能： 人脸二分类
 '''
 
 
 def forward(input, w, b, keepratio):
-    input_r = tf.reshape(input, shape=[-1, 40, 40, 1])  # 输入四维向量
+    input_r = tf.reshape(input, shape=[-1, 40, 40, 3])  # 输入图片
     # Layer1
     conv1 = tf.nn.conv2d(input_r, w['wc1'], strides=[1, 1, 1, 1], padding='SAME')
     relu1 = tf.nn.relu(tf.nn.bias_add(conv1, b['bc1']))
@@ -40,7 +40,7 @@ def forward(input, w, b, keepratio):
 
 
 if __name__=="__main__":
-    n_input = 40*40*1     #输入图像为28*28*3
+    n_input = 40*40*3     #输入图像为40×40×3
     n_classes = 2
 
     #input and output
@@ -50,7 +50,7 @@ if __name__=="__main__":
     #network param
     stddev = 0.1
     weights = {
-        'wc1': tf.Variable(tf.random_normal([3, 3, 1, 64],stddev=stddev)),
+        'wc1': tf.Variable(tf.random_normal([3, 3, 3, 64],stddev=stddev)),
         'wc2': tf.Variable(tf.random_normal([3, 3, 64, 128],stddev=stddev)),
         'wf1': tf.Variable(tf.random_normal([10*10*128, 1024],stddev=stddev)),
         'wf2': tf.Variable(tf.random_normal([1024, 1024],stddev=stddev)),
@@ -64,57 +64,63 @@ if __name__=="__main__":
         'bf3': tf.Variable(tf.random_normal([n_classes], stddev=stddev))
     }
 
-    #损失函数和优化
+    #优化
     pred = forward(input, weights, biases, keepratio)['out'] #预测值
-    cost = tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits(labels=output,logits=pred))
+    cost = tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits_v2(labels=output,logits=pred))
     optm = tf.train.AdamOptimizer(learning_rate=0.001).minimize(cost)
     corr = tf.equal(tf.argmax(pred,1),tf.argmax(output,1))
     accr = tf.reduce_mean(tf.cast(corr, tf.float32))
     init = tf.global_variables_initializer()
 
-    #保存模型
+    #设置
     save_step = 10
     saver = tf.train.Saver(max_to_keep=30)
     do_train = 1
 
     #计算
     train_epochs = 3000
-    batch_size = 6000
+    batch_size = 10000
     display_step = 1
-    saver = tf.train.Saver()
-    with tf.Session() as sess:
+    gpu_options = tf.GPUOptions(per_process_gpu_memory_fraction=0.9)
+    with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options, log_device_placement=False)) as sess:
         sess.run(init)
-        if do_train == 1:  # 训练
+        if do_train == 1:
+            img_batch, label_batch = A_tfrecords.get_tfrecord(20000, isTrain=True)
+            coord = tf.train.Coordinator()
+            thread = tf.train.start_queue_runners(sess, coord)
             ckpt = tf.train.get_checkpoint_state("tensorflow_first")
             if ckpt and ckpt.model_checkpoint_path:
                 saver.restore(sess, ckpt.model_checkpoint_path)
-                for epoch in range(211, train_epochs):
-                    avg_cost = 0
-                    num_batch = int(6000 / batch_size)  # train_set_size / batch_size
-                    for i in range(num_batch):  # 每个batch的送入，大小为batch_size * pic_size(500 * 28*28*1)
-                        img_batch, label_batch = A_tfrecords.get_tfrecord(batch_size, isTrain=False)
-                        coord = tf.train.Coordinator()
-                        thread = tf.train.start_queue_runners(sess, coord)
-                        data, label = sess.run([img_batch, label_batch])
-                        sess.run(optm, feed_dict={input: data, output: label, keepratio: 0.7})
-                        feeds = {input: data, output: label, keepratio: 1.}
-                        avg_cost += sess.run(cost, feed_dict=feeds) / num_batch
-                    # 显示
-                    if epoch % display_step == 0:
-                        print("Epoch: %04d/%04d cost: %.4f" % (epoch, train_epochs, avg_cost))
-                        train_acc = sess.run(accr, feed_dict={input: data, output: label, keepratio: 1})
-                        print("Training Accuracy: %.3f" % (train_acc))
-                    # 保存模型
-                    if epoch % save_step == 0:
-                        saver.save(sess, "tensorflow_first/cnn_basic.ckpt-" + str(epoch))
-                print("Train Finished!")
+            for epoch in range(0, train_epochs):
+                avg_cost = 0
+                num_batch = int(20000 / batch_size)  # train_set_size / batch_size
+                for i in range(num_batch):
+                    data, label = sess.run([img_batch[i * batch_size:(i + 1) * batch_size],
+                                            label_batch[i * batch_size:(i + 1) * batch_size]])
+                    sess.run(optm, feed_dict={input: data, output: label, keepratio: 0.7})
+                    feeds = {input: data, output: label, keepratio: 1.}
+                    avg_cost += sess.run(cost, feed_dict=feeds) / num_batch
+                # 显示
+                if epoch % display_step == 0:
+                    print("Epoch: %04d/%04d cost: %.4f" % (epoch, train_epochs, avg_cost))
+                    train_acc = sess.run(accr, feed_dict={input: data, output: label, keepratio: 1})
+                    print("Training Accuracy: %.3f" % (train_acc))
+                # 保存模型
+                if epoch % save_step == 0:
+                    saver.save(sess, "tensorflow_first/cnn_basic.ckpt-" + str(epoch))
+            print("Train Finished!")
+            coord.request_stop()
+            coord.join(thread)
 
         if do_train == 0:
-            img_batch, label_batch = A_tfrecords.get_tfrecord(6000, isTrain=False)
+            img_batch, label_batch = A_tfrecords.get_tfrecord(4000, isTrain=False)
             coord = tf.train.Coordinator()
             thread = tf.train.start_queue_runners(sess, coord)
             data, label = sess.run([img_batch, label_batch])
-            epoch = train_epochs - 10
-            saver.restore(sess, "tensorflow_first/cnn_basic.ckpt-" + str(200))
+            epoch = train_epochs - save_step
+            saver.restore(sess, "tensorflow_first/cnn_basic.ckpt-" + str(epoch))
             test_acc = sess.run(accr, feed_dict={input: data, output: label, keepratio: 1})
             print("Test Accuracy: %.3f" % (test_acc))
+            coord.request_stop()
+            coord.join(thread)
+

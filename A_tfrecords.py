@@ -3,14 +3,14 @@
 import tensorflow as tf
 from PIL import Image
 import os
-
-image_train_path = 'E:\PAPER\mnist_data_jpg\mnist_train_jpg1\\'
-label_train_path = 'E:\PAPER\mnist_data_jpg\mnist_train_jpg.txt'
-tfRecord_train = 'data_gray\mnist_train.tfrecords'
-image_test_path = 'E:\PAPER\mnist_data_jpg\mnist_test_jpg1\\'
-label_test_path = 'E:\PAPER\mnist_data_jpg\mnist_test_jpg.txt'
-tfRecord_test = 'data_gray\mnist_test.tfrecords'
-data_path = 'data_gray'
+import cv2
+image_train_path = '/home/ubuntu-16/PycharmProjects/mtcnn/data/dataset/train/'
+label_train_path = '/home/ubuntu-16/PycharmProjects/mtcnn/data/dataset/train/trainsplit.txt'
+tfRecord_train = '/home/ubuntu-16/PycharmProjects/paper/data/mnist_train.tfrecords'
+image_test_path = '/home/ubuntu-16/PycharmProjects/mtcnn/data/dataset/test/'
+label_test_path = '/home/ubuntu-16/PycharmProjects/mtcnn/data/dataset/test/testsplit.txt'
+tfRecord_test = '/home/ubuntu-16/PycharmProjects/paper/data/mnist_test.tfrecords'
+data_path = 'data'
 resize_height = 40
 resize_width = 40
 
@@ -25,6 +25,8 @@ def write_tfRecord(tfRecordName, image_path, label_path):
         value = content.split()
         img_path = image_path + value[0]
         img = Image.open(img_path)
+        assert img.mode == 'RGB'
+        img = img.resize((resize_width, resize_height),Image.ANTIALIAS)
         img_raw = img.tobytes()
         labels = [0] * 2
         labels[int(value[1])] = 1
@@ -61,7 +63,7 @@ def read_tfRecord(tfRecord_path):
                                            'img_raw': tf.FixedLenFeature([], tf.string)
                                        })
     img = tf.decode_raw(features['img_raw'], tf.uint8)
-    img.set_shape([1600])
+    img.set_shape([4800])
     img = tf.cast(img, tf.float32) * (1. / 255)
     label = tf.cast(features['label'], tf.float32)
     return img, label
@@ -75,8 +77,8 @@ def get_tfrecord(num, isTrain=True):
     img, label = read_tfRecord(tfRecord_path)
     img_batch, label_batch = tf.train.shuffle_batch([img, label],
                                                     batch_size=num,
-                                                    num_threads=4,
-                                                    capacity=6000,
+                                                    num_threads=2,
+                                                    capacity=20000,
                                                     min_after_dequeue=2000)
     return img_batch, label_batch
 
